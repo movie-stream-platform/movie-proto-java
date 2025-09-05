@@ -1,0 +1,89 @@
+name: Publish and Tag Java Library
+
+on:
+  push:
+    branches:
+      - main
+      - dev
+
+jobs:
+  build-publish-tag:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # Needed to push tags
+      packages: write   # Needed to publish packages
+
+    steps:
+      # 1. Checkout repo
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0  # Needed for tags
+
+      # 2. Set up Java
+      - name: Set up Java
+        uses: actions/setup-java@v3
+        with:
+          distribution: temurin
+          java-version: '17'
+          server-id: github
+          settings-path: ${{ github.workspace }}
+
+      # 3. Determine next version
+      - name: Determine version
+        id: version
+        run: |
+          # Get the latest tag, fallback to v1.0.0
+          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v1.0.0")
+          echo "Last tag: $LAST_TAG"
+
+          # Remove 'v' prefix
+          VERSION=${LAST_TAG#v}
+          MAJOR=${VERSION%%.*}
+          MINOR=${VERSION#*.}
+          MINOR=${MINOR%.*}
+          PATCH=${VERSION##*.}
+
+          BRANCH=${GITHUB_REF##*/}
+
+          if [[ "$BRANCH" == dev ]]; then
+              NEW_TAG="v$MAJOR.$MINOR.$PATCH-SNAPSHOT"
+          elif [[ "$BRANCH" == main ]]; then
+              MINOR=$((MINOR + 1))
+              PATCH=0
+              if [[ $MINOR -gt 99 ]]; then
+                  MAJOR=$((MAJOR + 1))
+                  MINOR=0
+              fi
+              NEW_TAG="v$MAJOR.$MINOR.$PATCH"
+          else
+              NEW_TAG="v$MAJOR.$MINOR.$PATCH"
+          fi
+
+          echo "Next version: $NEW_TAG"
+          echo "tag=$NEW_TAG" >> $GITHUB_ENV
+
+      # 4. Set project version
+      - name: Set project version
+        run: |
+          echo "Setting project version to ${{ env.tag }}"
+          # Gradle
+          ./gradlew -Pversion=${{ env.tag }} properties
+          # Maven (optional)
+          # mvn versions:set -DnewVersion=${{ env.tag }}
+
+      # 5. Build and publish
+      - name: Build and publish
+        run: |
+          ./gradlew clean build publish
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # 6. Tag and push
+      - name: Create and push Git tag
+        if: "!startsWith(github.ref, 'refs/tags/')"
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag ${{ env.tag }}
+          git push origin ${{ env.tag }}
