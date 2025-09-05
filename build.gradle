@@ -35,9 +35,12 @@ publishing {
     publications {
         mavenJava(MavenPublication) {
             from components.java
+
+            groupId = project.group
+            artifactId = "movie-proto-java" 
+            version = project.version
         }
     }
-
     repositories {
         maven {
             name = "GitHubPackages"
